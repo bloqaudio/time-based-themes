@@ -1,60 +1,67 @@
+'use strict';
+
+// Matches a 24h "HH:MM" time string (the format produced by
+// <input type="time"> and stored for sunrise/sunset).
+const TIME_PATTERN = /^([01]?\d|2[0-3]):[0-5]\d$/;
+
+// Helper: Log a debug message when debug mode is enabled.
+// DEBUG_MODE is defined in common.js, which loads after this file
+// but before any of these functions run.
+function debugLog(message) {
+    if (DEBUG_MODE)
+        console.log("automaticDark DEBUG: " + message);
+}
+
+// Helper: Print the error.
+function onError(error) {
+    console.error("automaticDark Error: " + (error && error.message ? error.message : error));
+}
+
+// Helper: Check that a value is a valid "HH:MM" time string.
+function isValidTimeString(time) {
+    return typeof time === "string" && TIME_PATTERN.test(time);
+}
+
 // Helper: Figure out if a time is in-between two times.
 // Return true if it is daytime.
 // Return false if it is nighttime.
 function timeInBetween(
-        curHours, curMins, 
-        sunriseHours, sunriseMins, 
+        curHours, curMins,
+        sunriseHours, sunriseMins,
         sunsetHours, sunsetMins
-    ){
-    if (DEBUG_MODE)
-        console.log("automaticDark DEBUG: Start timeInBetween");
+    ) {
+    debugLog("Start timeInBetween");
 
-    let curTimeInMins = curHours * 60 + parseInt(curMins);
-    let sunriseInMins = sunriseHours * 60 + parseInt(sunriseMins);
-    let sunsetInMins = sunsetHours * 60 + parseInt(sunsetMins);
-    let difference = sunsetInMins - sunriseInMins;
+    const curTimeInMins = parseInt(curHours, 10) * 60 + parseInt(curMins, 10);
+    const sunriseInMins = parseInt(sunriseHours, 10) * 60 + parseInt(sunriseMins, 10);
+    const sunsetInMins = parseInt(sunsetHours, 10) * 60 + parseInt(sunsetMins, 10);
 
-    // If the difference is negative, 
-    // we know the "sunrise" is on the previous day.
-    if (difference < 0) {
-        difference += 1440;
-        if (sunriseInMins <= curTimeInMins || curTimeInMins < sunsetInMins) {
-            // So, we need to do the comparisons a little differently.
-            if (DEBUG_MODE)
-                console.log("automaticDark DEBUG: It is currently daytime");
-            return true;
-        }
+    let isDaytime;
+    if (sunsetInMins - sunriseInMins < 0) {
+        // The "sunrise" is on the previous day, so the daytime
+        // window wraps around midnight.
+        isDaytime = sunriseInMins <= curTimeInMins || curTimeInMins < sunsetInMins;
     }
     else {
-        if (sunriseInMins <= curTimeInMins && curTimeInMins < sunsetInMins) {
-            if (DEBUG_MODE)
-                console.log("automaticDark DEBUG: It is currently daytime");
-            return true;
-        }
-}
-    if (DEBUG_MODE)
-        console.log("automaticDark DEBUG: It is currently nighttime");
-    return false;
+        isDaytime = sunriseInMins <= curTimeInMins && curTimeInMins < sunsetInMins;
+    }
+
+    debugLog("It is currently " + (isDaytime ? "daytime" : "nighttime"));
+    return isDaytime;
 }
 
-function addLeadZero (num){
-    if (DEBUG_MODE)
-        console.log("automaticDark DEBUG: Start addLeadZero");
-
+function addLeadZero(num) {
     if (num < 10) {
         return "0" + num;
     }
-    else {
-        return num;
-    }
+    return num;
 }
 
 // Helper:
 // Set storage only if overrideDefault is true or
-// the managed storage is empty.
+// the stored value is empty/invalid.
 function setStorage(obj, overrideDefault = false) {
-    if (DEBUG_MODE)
-        console.log("automaticDark DEBUG: Start setStorage");
+    debugLog("Start setStorage");
 
     const keys = Object.keys(obj);
     if (keys.length === 0) {
@@ -65,7 +72,7 @@ function setStorage(obj, overrideDefault = false) {
         .then((storedItems) => {
             const updates = {};
 
-            for (let key of keys) {
+            for (const key of keys) {
                 const existingValue = storedItems[key];
                 const isInvalidShape = existingValue !== undefined && existingValue !== null && typeof existingValue !== "object";
                 if (overrideDefault || isEmpty(existingValue) || isInvalidShape) {
@@ -80,27 +87,19 @@ function setStorage(obj, overrideDefault = false) {
             return browser.storage.local.set(updates)
                 .then(() => {
                     return browser.storage.local.get(keys);
-                }, onError);
-        }, onError);
+                });
+        });
 }
 
-// Helper: Get all active alarms.
+// Helper: Log all active alarms.
 function logAllAlarms() {
-    if (DEBUG_MODE)
-        console.log("automaticDark DEBUG: Start logAllAlarms");
-
     return browser.alarms.getAll()
-        .then(function(alarms) {
+        .then((alarms) => {
             if (DEBUG_MODE) {
                 console.log("automaticDark DEBUG: All active alarms: ");
                 console.log(alarms);
             }
         });
-}
-
-// Helper: Print the error.
-function onError(error) {
-    console.log("automaticDark Error: " + error);
 }
 
 // Helper: Check if the object is empty.
@@ -113,8 +112,8 @@ function isEmpty(obj) {
         return false;
     }
 
-    for (var key in obj) {
-        if (obj.hasOwnProperty(key))
+    for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key))
             return false;
     }
     return true;
@@ -124,13 +123,13 @@ function isEmpty(obj) {
 // return the next time it will occur as
 // milliseconds since the epoch.
 function convertToNextMilliEpoch(hours, minutes) {
-    let returnDate = new Date(Date.now());
-    returnDate.setHours(hours);
-    returnDate.setMinutes(minutes);
+    const returnDate = new Date(Date.now());
+    returnDate.setHours(parseInt(hours, 10));
+    returnDate.setMinutes(parseInt(minutes, 10));
     returnDate.setSeconds(0);
     returnDate.setMilliseconds(0);
 
-    // If the specified time has already occurred, 
+    // If the specified time has already occurred,
     // the next time it will occur will be the next day.
     if (returnDate < Date.now()) {
         returnDate.setDate(returnDate.getDate() + 1);
@@ -141,7 +140,5 @@ function convertToNextMilliEpoch(hours, minutes) {
 // Helper:
 // Convert the time from a Date object to a string in the format of HH:MM.
 function convertDateToString(date) {
-    let hours = date.getHours();
-    let minutes = date.getMinutes();
-    return addLeadZero(hours) + ":" + addLeadZero(minutes);
+    return addLeadZero(date.getHours()) + ":" + addLeadZero(date.getMinutes());
 }

@@ -2,7 +2,7 @@
 
 const KEY_PREFIX = 'autodark';
 
-const DEBUG_MODE_KEY = KEY_PREFIX + "debugMode"; 
+const DEBUG_MODE_KEY = KEY_PREFIX + "debugMode";
 
 const CURRENT_MODE_KEY = KEY_PREFIX + "currentMode"; // day-mode, night-mode
 
@@ -26,263 +26,200 @@ const DEFAULT_SUNSET_TIME = "20:00";
 const DEFAULT_DEBUG_MODE = false;
 
 // Default themes are set after looking through the user's
-// current theme and their installed themes.
+// current theme and their installed themes. They are recomputed
+// on demand (via setDefaultThemes) before every read, so they do
+// not need to survive event page suspension.
 let DEFAULT_DAYTIME_THEME = "";
 let DEFAULT_NIGHTTIME_THEME = "";
 
 let DEBUG_MODE = false;
+
+// Load the persisted debug flag. The key does not exist yet on a
+// fresh install (before init() writes defaults), so guard the read.
 browser.storage.local.get(DEBUG_MODE_KEY)
     .then((obj) => {
-        DEBUG_MODE = obj[DEBUG_MODE_KEY].check;
+        DEBUG_MODE = Boolean(obj[DEBUG_MODE_KEY] && obj[DEBUG_MODE_KEY].check);
+        debugLog("DEBUG_MODE is enabled.");
+    })
+    .catch(onError);
 
-        if (DEBUG_MODE)
-            console.log("automaticDark DEBUG: DEBUG_MODE is enabled.");
-    }, onError);
-
-function refreshLocationSuntimesAndAlarms() {
-    return calculateSuntimes()
-        .then((result) => {
-            return Promise.all([
-                browser.storage.local.set({[SUNRISE_TIME_KEY]: {time: convertDateToString(result.nextSunrise)}}),
-                browser.storage.local.set({[SUNSET_TIME_KEY]: {time: convertDateToString(result.nextSunset)}})
-            ]);
-        })
-        .then(() => {
-            return Promise.all([
-                createAlarm(SUNRISE_TIME_KEY, NEXT_SUNRISE_ALARM_NAME, 60 * 24),
-                createAlarm(SUNSET_TIME_KEY, NEXT_SUNSET_ALARM_NAME, 60 * 24)
-            ]);
-        });
+async function refreshLocationSuntimesAndAlarms() {
+    const result = await calculateSuntimes();
+    await browser.storage.local.set({
+        [SUNRISE_TIME_KEY]: {time: convertDateToString(result.nextSunrise)},
+        [SUNSET_TIME_KEY]: {time: convertDateToString(result.nextSunset)}
+    });
+    await Promise.all([
+        createAlarm(SUNRISE_TIME_KEY, NEXT_SUNRISE_ALARM_NAME, 60 * 24),
+        createAlarm(SUNSET_TIME_KEY, NEXT_SUNSET_ALARM_NAME, 60 * 24)
+    ]);
 }
 
 // Things to do when the extension is starting up
 // (or if the settings have been reset).
-function init() {
-    if (DEBUG_MODE) {
-        console.log("automaticDark DEBUG: 0 - Start init");
-        console.log("automaticDark DEBUG: 0 - Starting up automaticDark");
-    }
+// Event listener registration lives in background.js: MV3 event pages
+// require listeners to be registered synchronously at the top level.
+async function init() {
+    debugLog("0 - Starting up automaticDark");
 
     // Set values if they each have never been set before,
     // such as on first-time startup.
-    return setStorage({
-            [CHANGE_MODE_KEY]: {mode: DEFAULT_CHANGE_MODE},
-            [CHECK_TIME_STARTUP_ONLY_KEY]: {check: DEFAULT_CHECK_TIME_STARTUP_ONLY},
-            [DEBUG_MODE_KEY]: {check: DEFAULT_DEBUG_MODE},
-            [SUNRISE_TIME_KEY]: {time: DEFAULT_SUNRISE_TIME},
-            [SUNSET_TIME_KEY]: {time: DEFAULT_SUNSET_TIME}
-        })
-        .then((obj) => {
-            // Check the user's themes and check the default daytime and
-            // nighttime themes based on this.
-            return setDefaultThemes();
-        }, onError)
-        .then(() => {
-            return setStorage({
-                [DAYTIME_THEME_KEY]: {themeId: DEFAULT_DAYTIME_THEME},
-                [NIGHTTIME_THEME_KEY]: {themeId: DEFAULT_NIGHTTIME_THEME}
-            });
-        }, onError)
-        .then(() => {
-            // If flag is not set to check only on startup,
-            // create alarms to change the theme in the future.
-            if (!browser.alarms.onAlarm.hasListener(alarmListener)) {
-                browser.alarms.onAlarm.addListener(alarmListener);
-            }
-            return browser.storage.local.get([CHECK_TIME_STARTUP_ONLY_KEY, CHANGE_MODE_KEY]);
-        }, onError)
-        .then((obj) => {
-            if (!obj[CHECK_TIME_STARTUP_ONLY_KEY].check) {
-                // On start up, change the themes appropriately.
-                changeThemeBasedOnChangeMode(obj[CHANGE_MODE_KEY].mode);
+    await setStorage({
+        [CHANGE_MODE_KEY]: {mode: DEFAULT_CHANGE_MODE},
+        [CHECK_TIME_STARTUP_ONLY_KEY]: {check: DEFAULT_CHECK_TIME_STARTUP_ONLY},
+        [DEBUG_MODE_KEY]: {check: DEFAULT_DEBUG_MODE},
+        [SUNRISE_TIME_KEY]: {time: DEFAULT_SUNRISE_TIME},
+        [SUNSET_TIME_KEY]: {time: DEFAULT_SUNSET_TIME}
+    });
 
-                // Add a listener to change the theme when the window is focused.
+    // Check the user's themes and set the default daytime and
+    // nighttime themes based on this.
+    await setDefaultThemes();
+    await setStorage({
+        [DAYTIME_THEME_KEY]: {themeId: DEFAULT_DAYTIME_THEME},
+        [NIGHTTIME_THEME_KEY]: {themeId: DEFAULT_NIGHTTIME_THEME}
+    });
 
-                // For changing based on system theme, this is an additional check as
-                // matchMedia().addListener does not always work across OS configurations.
-                // Also for changing based on suntimes,
-                // every time the window is focused, check the time and reset the alarms.
-                // This prevents any delay in the alarms after OS sleep/hibernation.
-                if (!browser.windows.onFocusChanged.hasListener(onWindowFocusChanged)) {
-                    browser.windows.onFocusChanged.addListener(onWindowFocusChanged);
-                }
-                registerSystemThemeMediaListener();
+    const obj = await browser.storage.local.get([CHECK_TIME_STARTUP_ONLY_KEY, CHANGE_MODE_KEY]);
 
-                if (obj[CHANGE_MODE_KEY].mode === "system-theme") {
-                    return setContentColorSchemeToAuto();
-                }
-                else if (obj[CHANGE_MODE_KEY].mode === "location-suntimes") {
-                    // If we are set to get suntimes automatically,
-                    // then calculate the suntimes again.
-                    return refreshLocationSuntimesAndAlarms();
-                }
-                else { // manual-suntimes
-                    return Promise.all([
-                        createAlarm(SUNRISE_TIME_KEY, NEXT_SUNRISE_ALARM_NAME, 60 * 24),
-                        createAlarm(SUNSET_TIME_KEY, NEXT_SUNSET_ALARM_NAME, 60 * 24)
-                    ]);
-                }
-            }
-        }, onError)
-        .then((obj) => {
-            enableSchemeChangeDetection();
-        }, onError);
+    // If the flag is not set to check only on startup,
+    // apply the theme now and create alarms for future changes.
+    if (!obj[CHECK_TIME_STARTUP_ONLY_KEY].check) {
+        const mode = obj[CHANGE_MODE_KEY].mode;
+        await changeThemeBasedOnChangeMode(mode);
+
+        if (mode === "system-theme") {
+            await setContentColorSchemeToAuto();
+        }
+        else if (mode === "location-suntimes") {
+            // If we are set to get suntimes automatically,
+            // then calculate the suntimes again.
+            await refreshLocationSuntimesAndAlarms();
+        }
+        else { // manual-suntimes
+            await Promise.all([
+                createAlarm(SUNRISE_TIME_KEY, NEXT_SUNRISE_ALARM_NAME, 60 * 24),
+                createAlarm(SUNSET_TIME_KEY, NEXT_SUNSET_ALARM_NAME, 60 * 24)
+            ]);
+        }
+    }
+
+    await enableSchemeChangeDetection();
 }
 
 // Changes the current theme.
 // Takes a parameter indicating how to decide what theme to change to.
-function changeThemeBasedOnChangeMode(mode) {
-    if (DEBUG_MODE)
-        console.log("automaticDark DEBUG: Start changeThemeBasedOnChangeMode");
+async function changeThemeBasedOnChangeMode(mode) {
+    debugLog("Start changeThemeBasedOnChangeMode");
 
-    const resolvedModePromise = mode
-        ? Promise.resolve(mode)
-        : browser.storage.local.get(CHANGE_MODE_KEY)
-            .then((obj) => {
-                return obj[CHANGE_MODE_KEY].mode;
-            }, onError);
+    let resolvedMode = mode;
+    if (!resolvedMode) {
+        const obj = await browser.storage.local.get(CHANGE_MODE_KEY);
+        resolvedMode = obj[CHANGE_MODE_KEY] && obj[CHANGE_MODE_KEY].mode;
+    }
+    if (!resolvedMode) {
+        resolvedMode = DEFAULT_CHANGE_MODE;
+    }
 
-    return resolvedModePromise
-        .then((resolvedMode) => {
-            if (!resolvedMode) {
-                resolvedMode = DEFAULT_CHANGE_MODE;
-            }
+    debugLog("50 changeThemeBasedOnChangeMode - Mode is set to: " + resolvedMode);
 
-            if (DEBUG_MODE)
-                console.log("automaticDark DEBUG: 50 changeThemeBasedOnChangeMode - Mode is set to: " + resolvedMode);
-
-            if (resolvedMode === "system-theme") {
-                return checkSysTheme();
-            }
-            else if (resolvedMode === "location-suntimes" || resolvedMode === "manual-suntimes"){
-                return checkTime();
-            }
-        }, onError);
+    if (resolvedMode === "system-theme") {
+        return checkSysTheme();
+    }
+    if (resolvedMode === "location-suntimes" || resolvedMode === "manual-suntimes") {
+        return checkTime();
+    }
 }
 
-// Creates an alarm based on a key used to get 
+// Creates an alarm based on a key used to get
 // a String in the 24h format "HH:MM" and an alarm name.
-function createAlarm(timeKey, alarmName, periodInMinutes = null) {
-    if (DEBUG_MODE)
-        console.log("automaticDark DEBUG: Start createAlarm");
+async function createAlarm(timeKey, alarmName, periodInMinutes = null) {
+    debugLog("Start createAlarm");
 
-    return browser.storage.local.get([
-            CHECK_TIME_STARTUP_ONLY_KEY,
-            timeKey
-        ])
-        .then((obj) => {
-            let timeSplit = obj[timeKey].time.split(":");
+    const obj = await browser.storage.local.get(timeKey);
+    const timeValue = obj[timeKey] && obj[timeKey].time;
+    if (!isValidTimeString(timeValue)) {
+        throw new Error("Cannot create alarm '" + alarmName + "': invalid time value '" + timeValue + "'.");
+    }
 
-            const when = convertToNextMilliEpoch(timeSplit[0], timeSplit[1]);
-            return browser.alarms.create(alarmName, {
-                when,
-                periodInMinutes
-            })
-         }, onError)
-        .then(() => {
-            //logAllAlarms();
-        }, onError);
+    const timeSplit = timeValue.split(":");
+    return browser.alarms.create(alarmName, {
+        when: convertToNextMilliEpoch(timeSplit[0], timeSplit[1]),
+        periodInMinutes
+    });
 }
 
 // Depending on the alarm name passed, this listener will:
-// - Get the stored daytime/nighttime theme and try to enable theme.
-// - Check the time and change the theme accordingly.
-function alarmListener(alarmInfo) {
-    if (DEBUG_MODE)
-        console.log("automaticDark DEBUG: Start alarmListener");
+// - Get the stored daytime/nighttime theme and try to enable it.
+// - In location mode, recalculate the suntimes and reset the alarms first.
+async function alarmListener(alarmInfo) {
+    debugLog("Start alarmListener");
 
+    let themeKey;
     if (alarmInfo.name === NEXT_SUNRISE_ALARM_NAME) {
-        return browser.storage.local.get([CHANGE_MODE_KEY, DAYTIME_THEME_KEY])
-            .then((values) => {
-                const mode = values[CHANGE_MODE_KEY].mode;
-
-                if (mode === "location-suntimes") {
-                    return refreshLocationSuntimesAndAlarms()
-                        .then(() => {
-                            return enableTheme(values, DAYTIME_THEME_KEY);
-                        }, onError);
-                }
-
-                return enableTheme(values, DAYTIME_THEME_KEY);
-            }, onError);
+        themeKey = DAYTIME_THEME_KEY;
     }
     else if (alarmInfo.name === NEXT_SUNSET_ALARM_NAME) {
-        return browser.storage.local.get([CHANGE_MODE_KEY, NIGHTTIME_THEME_KEY])
-            .then((values) => {
-                const mode = values[CHANGE_MODE_KEY].mode;
-
-                if (mode === "location-suntimes") {
-                    return refreshLocationSuntimesAndAlarms()
-                        .then(() => {
-                            return enableTheme(values, NIGHTTIME_THEME_KEY);
-                        }, onError);
-                }
-
-                return enableTheme(values, NIGHTTIME_THEME_KEY);
-            }, onError);
+        themeKey = NIGHTTIME_THEME_KEY;
     }
-    else if (alarmInfo.name === "checkTime") {
-        return checkTime();
+    else {
+        return;
     }
+
+    const values = await browser.storage.local.get([CHANGE_MODE_KEY, themeKey]);
+    if (values[CHANGE_MODE_KEY] && values[CHANGE_MODE_KEY].mode === "location-suntimes") {
+        await refreshLocationSuntimesAndAlarms();
+    }
+    await enableTheme(values, themeKey);
 }
 
 // Check the current system time and set the theme based on the time.
 // Will set the daytime theme between sunrise and sunset.
 // Otherwise, set nighttime theme.
+async function checkTime(hasRepairedDefaults = false) {
+    const date = new Date(Date.now());
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
 
-// TODO: Can split this function to be more generic. Make function enableTime happen as a parameter.
-function checkTime() {
-    let date = new Date(Date.now());
-    let hours = date.getHours();
-    let minutes = date.getMinutes();
+    debugLog("Start checkTime");
+    debugLog("It is currently: " + hours + ":" + minutes + ". Conducting time check now...");
 
-    if (DEBUG_MODE) {
-        console.log("automaticDark DEBUG: Start checkTime");
-        console.log("automaticDark DEBUG: It is currently: " + hours + ":" + minutes + ". Conducting time check now...");
+    const obj = await browser.storage.local.get([SUNRISE_TIME_KEY, SUNSET_TIME_KEY]);
+    const sunriseValue = obj[SUNRISE_TIME_KEY] && obj[SUNRISE_TIME_KEY].time;
+    const sunsetValue = obj[SUNSET_TIME_KEY] && obj[SUNSET_TIME_KEY].time;
+
+    if (!isValidTimeString(sunriseValue) || !isValidTimeString(sunsetValue)) {
+        if (hasRepairedDefaults) {
+            throw new Error("checkTime: sunrise/sunset values are still invalid after reapplying defaults.");
+        }
+
+        debugLog("checkTime - Missing or invalid sunrise/sunset values. Reapplying defaults.");
+
+        const repairs = {};
+        if (!isValidTimeString(sunriseValue)) {
+            repairs[SUNRISE_TIME_KEY] = {time: DEFAULT_SUNRISE_TIME};
+        }
+        if (!isValidTimeString(sunsetValue)) {
+            repairs[SUNSET_TIME_KEY] = {time: DEFAULT_SUNSET_TIME};
+        }
+        await browser.storage.local.set(repairs);
+        return checkTime(true);
     }
 
-    return browser.storage.local.get([SUNRISE_TIME_KEY, SUNSET_TIME_KEY])
-        .then((obj) => {
-            const sunriseValue = obj[SUNRISE_TIME_KEY] && obj[SUNRISE_TIME_KEY].time;
-            const sunsetValue = obj[SUNSET_TIME_KEY] && obj[SUNSET_TIME_KEY].time;
+    const sunriseSplit = sunriseValue.split(":");
+    const sunsetSplit = sunsetValue.split(":");
 
-            if (!sunriseValue || !sunsetValue) {
-                if (DEBUG_MODE)
-                    console.log("automaticDark DEBUG: checkTime - Missing sunrise/sunset values. Reapplying defaults.");
+    const isDaytime = timeInBetween(
+        hours, minutes,
+        sunriseSplit[0], sunriseSplit[1],
+        sunsetSplit[0], sunsetSplit[1]);
 
-                return setStorage({
-                        [SUNRISE_TIME_KEY]: {time: DEFAULT_SUNRISE_TIME},
-                        [SUNSET_TIME_KEY]: {time: DEFAULT_SUNSET_TIME}
-                    })
-                    .then(() => {
-                        return checkTime();
-                    }, onError);
-            }
-
-            let sunriseSplit = sunriseValue.split(":");
-            let sunsetSplit = sunsetValue.split(":");
-
-            if (timeInBetween(
-                    hours, minutes, 
-                    sunriseSplit[0], sunriseSplit[1], 
-                    sunsetSplit[0], sunsetSplit[1])) {
-                return browser.storage.local.get(DAYTIME_THEME_KEY)
-                    .then((obj) => {
-                        return enableTheme(obj, DAYTIME_THEME_KEY)
-                            .then(() => {
-                                return browser.storage.local.set({[CURRENT_MODE_KEY]: {mode: "day-mode"}});
-                            });
-                    }, onError);
-            } else {
-                return browser.storage.local.get(NIGHTTIME_THEME_KEY)
-                    .then((obj) => {
-                        return enableTheme(obj, NIGHTTIME_THEME_KEY)
-                            .then(() => {
-                                return browser.storage.local.set({[CURRENT_MODE_KEY]: {mode: "night-mode"}});
-                            });
-                    }, onError);
-            }
-        }, onError);
+    const themeKey = isDaytime ? DAYTIME_THEME_KEY : NIGHTTIME_THEME_KEY;
+    const theme = await browser.storage.local.get(themeKey);
+    await enableTheme(theme, themeKey);
+    await browser.storage.local.set({
+        [CURRENT_MODE_KEY]: {mode: isDaytime ? "day-mode" : "night-mode"}
+    });
 }
 
 function getFallbackThemeId(themeKey) {
@@ -293,83 +230,70 @@ function getFallbackThemeId(themeKey) {
     return DEFAULT_DAYTIME_THEME;
 }
 
-function resolveThemeRecord(theme, themeKey) {
+async function resolveThemeRecord(theme, themeKey) {
     const themeRecord = theme && theme[themeKey];
     if (!isEmpty(themeRecord) && themeRecord.themeId) {
-        return Promise.resolve(themeRecord);
+        return themeRecord;
     }
 
-    if (DEBUG_MODE)
-        console.log("automaticDark DEBUG: Missing theme record for key: " + themeKey + ". Using fallback.");
+    debugLog("Missing theme record for key: " + themeKey + ". Using fallback.");
 
-    return setDefaultThemes()
-        .then(() => {
-            const fallbackThemeId = getFallbackThemeId(themeKey);
-            if (!fallbackThemeId) {
-                onError("No fallback theme available for key: " + themeKey);
-                return null;
-            }
+    await setDefaultThemes();
+    const fallbackThemeId = getFallbackThemeId(themeKey);
+    if (!fallbackThemeId) {
+        throw new Error("No fallback theme available for key: " + themeKey);
+    }
 
-            return browser.storage.local.set({[themeKey]: {themeId: fallbackThemeId}})
-                .then(() => {
-                    return {themeId: fallbackThemeId};
-                }, onError);
-        }, onError);
+    await browser.storage.local.set({[themeKey]: {themeId: fallbackThemeId}});
+    return {themeId: fallbackThemeId};
 }
 
-// Parse the object given and enable the theme.if it is not
-// already enabled.
-function enableTheme(theme, themeKey, hasRetriedFallback = false) {
-    if (DEBUG_MODE)
-        console.log("automaticDark DEBUG: Start enableTheme");
+// Parse the object given and enable the theme
+// if it is not already enabled.
+// Falls back to a default theme (once) if the stored theme
+// is missing or no longer installed.
+async function enableTheme(theme, themeKey, hasRetriedFallback = false) {
+    debugLog("Start enableTheme");
 
-    return resolveThemeRecord(theme, themeKey)
-        .then((themeRecord) => {
-            if (!themeRecord || !themeRecord.themeId) {
-                return;
-            }
+    const themeRecord = await resolveThemeRecord(theme, themeKey);
 
-            return browser.management.get(themeRecord.themeId)
-                .then((extInfo) => {
-                    if (!extInfo.enabled) {
-                        if (DEBUG_MODE)
-                            console.log("automaticDark DEBUG: 100 enableTheme - Enabled theme " + themeRecord.themeId);
-                        setSchemeChangeDetectionBlock(true);
-                        return browser.management.setEnabled(themeRecord.themeId, true)
-                            .then(() => {
-                                return enableSchemeChangeDetection();
-                            }, (error) => {
-                                setSchemeChangeDetectionBlock(false);
-                                onError(error);
-                            });
-                    }
+    let extInfo;
+    try {
+        extInfo = await browser.management.get(themeRecord.themeId);
+    } catch (error) {
+        if (hasRetriedFallback) {
+            throw error;
+        }
 
-                    if (DEBUG_MODE)
-                        console.log("automaticDark DEBUG: 100 enableTheme - " + themeRecord.themeId + " is already enabled.");
-                }, (error) => {
-                    if (hasRetriedFallback) {
-                        onError(error);
-                        return;
-                    }
+        debugLog("Theme not available: " + themeRecord.themeId + ". Retrying with fallback.");
 
-                    if (DEBUG_MODE)
-                        console.log("automaticDark DEBUG: Theme not available: " + themeRecord.themeId + ". Retrying with fallback.");
+        await setDefaultThemes();
+        const fallbackThemeId = getFallbackThemeId(themeKey);
+        if (!fallbackThemeId || fallbackThemeId === themeRecord.themeId) {
+            throw error;
+        }
 
-                    return setDefaultThemes()
-                        .then(() => {
-                            const fallbackThemeId = getFallbackThemeId(themeKey);
-                            if (!fallbackThemeId || fallbackThemeId === themeRecord.themeId) {
-                                onError(error);
-                                return;
-                            }
+        await browser.storage.local.set({[themeKey]: {themeId: fallbackThemeId}});
+        return enableTheme({[themeKey]: {themeId: fallbackThemeId}}, themeKey, true);
+    }
 
-                            return browser.storage.local.set({[themeKey]: {themeId: fallbackThemeId}})
-                                .then(() => {
-                                    return enableTheme({[themeKey]: {themeId: fallbackThemeId}}, themeKey, true);
-                                }, onError);
-                        }, onError);
-                });
-        }, onError);
+    if (extInfo.enabled) {
+        debugLog("100 enableTheme - " + themeRecord.themeId + " is already enabled.");
+        return;
+    }
+
+    debugLog("100 enableTheme - Enabling theme " + themeRecord.themeId);
+
+    // Block prefers-color-scheme change detection while switching so the
+    // switch itself does not re-trigger a theme change (infinite loop).
+    setSchemeChangeDetectionBlock(true);
+    try {
+        await browser.management.setEnabled(themeRecord.themeId, true);
+    } catch (error) {
+        setSchemeChangeDetectionBlock(false);
+        throw error;
+    }
+    await enableSchemeChangeDetection();
 }
 
 // Set the currently enabled theme
@@ -377,98 +301,97 @@ function enableTheme(theme, themeKey, hasRetriedFallback = false) {
 //
 // Set default nighttime theme to Firefox's
 // default if it is available.
-function setDefaultThemes() {
-    if (DEBUG_MODE)
-        console.log("automaticDark DEBUG: Start setDefaultThemes");
+async function setDefaultThemes() {
+    debugLog("Start setDefaultThemes");
 
     DEFAULT_DAYTIME_THEME = "";
     DEFAULT_NIGHTTIME_THEME = "";
 
-    // Iterate through each theme.
-    return browser.management.getAll()
-        .then((extensions) => {
-            for (let extension of extensions) {
-                if (extension.type === 'theme') {
-                    if (extension.enabled) {
-                        DEFAULT_DAYTIME_THEME = extension.id;
-                        DEFAULT_NIGHTTIME_THEME = extension.id;
-                    }
-                    // If the theme is Firefox's default dark theme,
-                    // set the default nighttime theme to it.
-                    if (extension.id === "firefox-compact-dark@mozilla.org") {
-                        DEFAULT_NIGHTTIME_THEME = extension.id;
-                    }
-                }
-            }
-        })
+    const extensions = await browser.management.getAll();
+    for (const extension of extensions) {
+        if (extension.type !== 'theme') {
+            continue;
+        }
+        if (extension.enabled) {
+            DEFAULT_DAYTIME_THEME = extension.id;
+            DEFAULT_NIGHTTIME_THEME = extension.id;
+        }
+        // If the theme is Firefox's default dark theme,
+        // set the default nighttime theme to it.
+        if (extension.id === "firefox-compact-dark@mozilla.org") {
+            DEFAULT_NIGHTTIME_THEME = extension.id;
+        }
+    }
 }
 
 // Prompt user to give location. Then store it.
 function setGeolocation() {
-    if (DEBUG_MODE)
-        console.log("automaticDark DEBUG: Start setGeolocation");
+    debugLog("Start setGeolocation");
 
     return new Promise((resolve, reject) => {
         if (!navigator.geolocation) {
-            reject('Geolocation is not supported by your browser.');
-        } else {
-            navigator.geolocation.getCurrentPosition((position) => {
-                    setStorage({
-                        [GEOLOCATION_LATITUDE_KEY]: {latitude: position.coords.latitude},
-                        [GEOLOCATION_LONGITUDE_KEY]: {longitude: position.coords.longitude}
-                    })
-                    .then(() => {
-                        resolve(); 
-                    });
-                }, () => {
-                reject("Unable to fetch current location.");
-            });
+            reject(new Error("Geolocation is not supported by your browser."));
+            return;
         }
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                // Override any previously stored coordinates so a user
+                // who has moved gets fresh suntimes.
+                setStorage({
+                    [GEOLOCATION_LATITUDE_KEY]: {latitude: position.coords.latitude},
+                    [GEOLOCATION_LONGITUDE_KEY]: {longitude: position.coords.longitude}
+                }, true).then(resolve, reject);
+            },
+            (positionError) => {
+                reject(new Error("Unable to fetch current location: " +
+                    (positionError && positionError.message ? positionError.message : "permission denied.")));
+            }
+        );
     });
 }
 
 // Calculate the next sunrise/sunset times
-// based on today's date,.tomorrow's date, and geolocation in storage.
-function calculateSuntimes() {
-    if (DEBUG_MODE)
-        console.log("automaticDark DEBUG: Start calculateSuntimes");
+// based on today's date, tomorrow's date, and geolocation in storage.
+async function calculateSuntimes() {
+    debugLog("Start calculateSuntimes");
 
-    return browser.storage.local.get([GEOLOCATION_LATITUDE_KEY, GEOLOCATION_LONGITUDE_KEY])
-        .then((position) => {
+    const position = await browser.storage.local.get([GEOLOCATION_LATITUDE_KEY, GEOLOCATION_LONGITUDE_KEY]);
+    const latitudeRecord = position[GEOLOCATION_LATITUDE_KEY];
+    const longitudeRecord = position[GEOLOCATION_LONGITUDE_KEY];
 
-            // Prepare today and tomorrow's date for calculations.
-            let today = new Date(Date.now());
-            let tomorrow =  new Date(Date.now());
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            let dates = [today, tomorrow];
+    if (!latitudeRecord || typeof latitudeRecord.latitude !== "number" ||
+            !longitudeRecord || typeof longitudeRecord.longitude !== "number") {
+        throw new Error("calculateSuntimes: no stored geolocation. " +
+            "Re-select automatic sunrise/sunset times in the options page.");
+    }
 
-            let results = [];
-            dates.forEach((date) => {
-                results.push(
-                    // Do the calculations using SunCalc.
-                    // Figure out today and tomorrow's sunrise/sunset times.
-                    SunCalc.getTimes(date, 
-                        position[GEOLOCATION_LATITUDE_KEY].latitude, 
-                        position[GEOLOCATION_LONGITUDE_KEY].longitude)
-                );
-            });
+    // Prepare today and tomorrow's date for calculations.
+    const today = new Date(Date.now());
+    const tomorrow = new Date(Date.now());
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
-            let now = new Date(Date.now());
-            let nextSunrise = new Date(results[0].sunrise);
-            let nextSunset = new Date(results[0].sunset);
-            nextSunrise.setDate(nextSunrise.getDate() + 10);
-            nextSunset.setDate(nextSunset.getDate() + 10);
+    // Do the calculations using SunCalc.
+    // Figure out today and tomorrow's sunrise/sunset times.
+    const results = [today, tomorrow].map((date) =>
+        SunCalc.getTimes(date, latitudeRecord.latitude, longitudeRecord.longitude)
+    );
 
-            // Figure out whether today or tomorrow's sunrise/sunset time should be used.
-            results.forEach((result) => {
-                if (now < result.sunrise && result.sunrise < nextSunrise) {
-                    nextSunrise = result.sunrise;
-                }
-                if (now < result.sunset && result.sunset < nextSunset) {
-                    nextSunset = result.sunset;
-                }
-            });
+    const now = new Date(Date.now());
+    let nextSunrise = new Date(results[0].sunrise);
+    let nextSunset = new Date(results[0].sunset);
+    nextSunrise.setDate(nextSunrise.getDate() + 10);
+    nextSunset.setDate(nextSunset.getDate() + 10);
 
-            return {nextSunrise: nextSunrise, nextSunset: nextSunset};
-        }, onError);
+    // Figure out whether today or tomorrow's sunrise/sunset time should be used.
+    results.forEach((result) => {
+        if (now < result.sunrise && result.sunrise < nextSunrise) {
+            nextSunrise = result.sunrise;
+        }
+        if (now < result.sunset && result.sunset < nextSunset) {
+            nextSunset = result.sunset;
+        }
+    });
+
+    return {nextSunrise, nextSunset};
 }
