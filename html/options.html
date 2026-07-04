@@ -5,14 +5,14 @@
     <title>automaticDark Options</title>
     <link href="../css/options.css" rel="stylesheet" type="text/css">
 
-    <link href="../img/automaticDark-op-tbg-300.png" type="icon/png" rel="icon" />
+    <link href="../img/automaticDark-op-tbg-300.png" type="image/png" rel="icon" />
 </head>
 <body class="night">
 	<header>
 	    <h1>
-	    	<img class="logo day-mode" src="../img/automaticDark-ow-tbg-300.png" alt="automaticDark Logo"  width="32" height="32"> 
-	    	<img class="logo night-mode" src="../img/automaticDark-wp-tbg-300.png" alt="automaticDark Logo"  width="32" height="32"> 
-	    	<img class="logo off-mode" src="../img/automaticDark-w-tbg-300.png" alt="automaticDark Logo"  width="32" height="32"> 
+	    	<img class="logo day-mode" src="../img/automaticDark-ow-tbg-300.png" alt="automaticDark Logo"  width="32" height="32">
+	    	<img class="logo night-mode" src="../img/automaticDark-wp-tbg-300.png" alt="automaticDark Logo"  width="32" height="32">
+	    	<img class="logo off-mode" src="../img/automaticDark-w-tbg-300.png" alt="automaticDark Logo"  width="32" height="32">
 	        automaticDark Options
 	    </h1>
 	</header>
@@ -24,7 +24,7 @@
             <label for="automatic-suntimes-radio">Automatically set sunrise/sunset times (requires location)</label>
             <label id="location-permission-warning" style="color: red; display: none;"> - Location permission needs to be granted</label>
         </p>
-        <p>
+        <div class="setting-group">
             <input type="radio" id="manual-suntimes-radio" name="set-suntimes" value="manual-suntimes">
             <label for="manual-suntimes-radio">Manually set sunrise/sunset times</label>
 
@@ -35,7 +35,7 @@
                 <label for="sunset-time">Sunset time: </label>
                 <input id="sunset-time" type="time">
             </div>
-        </p>
+        </div>
         <p>
             <input type="radio" id="system-theme-radio" name="set-suntimes" value="system-theme">
             <label for="system-theme-radio">Change themes based on the system theme</label>
@@ -67,37 +67,36 @@
                 <label for="debug-mode">Debug mode</label>
             </small>
         </p>
-        </p>
     </section>
     <div class="divider"></div>
     <section id="about">
         <h1>About</h1>
-        <p>
-            automaticDark 1.4.3 by <a class="no-style" href="https://github.com/skhzhang" target="_blank">Simon Zhang</a>
+        <div class="setting-group">
+            automaticDark <span id="version-text"></span> by <a class="no-style" href="https://github.com/skhzhang" target="_blank" rel="noopener noreferrer">Simon Zhang</a>
             <ul>
-                <li><a href="https://addons.mozilla.org/en-US/firefox/addon/automatic-dark/" target="_blank">Firefox Add-ons</a></li>
-                <li><a href="https://github.com/skhzhang/time-based-themes" target="_blank">Github</a></li>
+                <li><a href="https://addons.mozilla.org/en-US/firefox/addon/automatic-dark/" target="_blank" rel="noopener noreferrer">Firefox Add-ons</a></li>
+                <li><a href="https://github.com/skhzhang/time-based-themes" target="_blank" rel="noopener noreferrer">Github</a></li>
                 <li>
                     Support - bugs, suggestions, feedback
                     <ul>
                         <li>
-                            <a href="https://github.com/skhzhang/time-based-themes/issues/new" target="_blank">Log an issue</a> (requires Github account)
+                            <a href="https://github.com/skhzhang/time-based-themes/issues/new" target="_blank" rel="noopener noreferrer">Log an issue</a> (requires Github account)
                         </li>
                         <li>
-                            <a href="mailto:simonkhzhang@gmail.com" target="_blank">Email me</a>
+                            <a href="mailto:simonkhzhang@gmail.com">Email me</a>
                         </li>
                     </ul>
                 </li>
                 <li>
                     Thank you:
                     <ul>
-                        <li><a href="https://github.com/skhzhang/time-based-themes/graphs/contributors" target="_blank">Github project contributors</a></li>
-                        <li><a href="https://github.com/easonwong-de">Eason Wong</a></li>
-                        <li><a href="https://github.com/mourner/suncalc">SunCalc</a></li>
+                        <li><a href="https://github.com/skhzhang/time-based-themes/graphs/contributors" target="_blank" rel="noopener noreferrer">Github project contributors</a></li>
+                        <li><a href="https://github.com/easonwong-de" target="_blank" rel="noopener noreferrer">Eason Wong</a></li>
+                        <li><a href="https://github.com/mourner/suncalc" target="_blank" rel="noopener noreferrer">SunCalc</a></li>
                     </ul>
                 </li>
             </ul>
-        </p>
+        </div>
     </section>
     <script type="text/javascript" src="../lib/suncalc.js"></script>
     <script type="text/javascript" src="../js/utils.js"></script>
