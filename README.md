@@ -1,6 +1,6 @@
 # automaticDark - Time-Based Theme Changer
 
-![Options page in version 1.3.0](https://raw.githubusercontent.com/skhzhang/time-based-themes/assets/automaticdark-cover.png)
+![Options page in version 1.3.0](https://raw.githubusercontent.com/bloqaudio/time-based-themes/assets/automaticdark-cover.png)
 
 This is a simple Firefox WebExtension that allows you to automatically switch between your themes based on the current time.
 
@@ -19,13 +19,12 @@ Set Firefox to change the UI to a dark theme during the night and change back to
 - Note that Firefox's Default theme may match the default system themes out of the box (for Windows 10, this is as of [63.0](https://www.mozilla.org/firefox/63.0/releasenotes/)).
 
 ## Screenshots
-![Options page in version 1.3.0](https://raw.githubusercontent.com/skhzhang/time-based-themes/assets/automaticdark-options-1.3.0-1.png)
-![Dark-themed options page in version 1.3.0](https://raw.githubusercontent.com/skhzhang/time-based-themes/assets/automaticdark-options-1.3.0-2.png)
+![Options page in version 1.3.0](https://raw.githubusercontent.com/bloqaudio/time-based-themes/assets/automaticdark-options-1.3.0-1.png)
+![Dark-themed options page in version 1.3.0](https://raw.githubusercontent.com/bloqaudio/time-based-themes/assets/automaticdark-options-1.3.0-2.png)
 - Screenshot of the Options page in version 1.3.0.
 
 ## Feedback / Contributions
 Feedback and pull requests welcome! What do you think? Let me know!
-- [Add a new issue](https://github.com/skhzhang/time-based-themes/issues/new)
-- [Email](mailto:simonkhzhang+automaticdark@gmail.com)
+- [Add a new issue](https://github.com/bloqaudio/time-based-themes/issues/new)
 
-[issue5]: https://github.com/skhzhang/time-based-themes/issues/5
+[issue5]: https://github.com/bloqaudio/time-based-themes/issues/5
